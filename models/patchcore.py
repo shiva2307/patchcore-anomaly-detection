@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
 import torch
 from torch import nn
 
 from utils.coreset import CoresetSampler
-from utils.feature_extractor import CNNFeatureExtractor
+from utils.feature_extractor import FeatureExtractor, PatchEmbeddingBatch
 from utils.memory_bank import MemoryBank
 from utils.nearest_neighbor import NearestNeighborScorer
-from utils.patch_extractor import PatchEmbeddingBatch, PatchExtractor
 
 BatchType = Union[torch.Tensor, Dict[str, torch.Tensor], Tuple, List]
 
@@ -32,29 +31,15 @@ class PatchCore(nn.Module):
 
     def __init__(
         self,
-        backbone: str = "wide_resnet50_2",
-        layers: Sequence[str] = ("layer2", "layer3"),
         device: Optional[torch.device | str] = None,
-        patch_size: int = 3,
-        stride: int = 1,
+        patch_size: int = 1,
         coreset_ratio: float = 0.01,
         coreset_min_samples: int = 512,
         k_neighbors: int = 5,
-        normalize_patches: bool = True,
     ) -> None:
         super().__init__()
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-        self.feature_extractor = CNNFeatureExtractor(
-            backbone=backbone,
-            layers=layers,
-            pretrained=True,
-            train_backbone=False,
-        ).to(self.device)
-        self.patch_extractor = PatchExtractor(
-            kernel_size=patch_size,
-            stride=stride,
-            normalize=normalize_patches,
-        )
+        self.feature_extractor = FeatureExtractor(patch_size=patch_size).to(self.device)
         self.memory_bank = MemoryBank(device="cpu")
         self.nearest_neighbor = NearestNeighborScorer(k=k_neighbors)
         self.coreset_sampler = (

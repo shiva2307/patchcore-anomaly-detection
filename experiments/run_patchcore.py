@@ -24,10 +24,7 @@ def parse_args():
     parser.add_argument("--resize", type=int, default=256)
     parser.add_argument("--crop", type=int, default=224)
     parser.add_argument("--augment", action="store_true", help="Enable light augmentation on the train split.")
-    parser.add_argument("--layers", type=str, default="layer2,layer3", help="Comma separated backbone layers.")
-    parser.add_argument("--backbone", type=str, default="wide_resnet50_2", choices=["wide_resnet50_2", "resnet50"])
-    parser.add_argument("--patch-size", type=int, default=3)
-    parser.add_argument("--stride", type=int, default=1)
+    parser.add_argument("--patch-size", type=int, default=1)
     parser.add_argument("--coreset-ratio", type=float, default=0.01)
     parser.add_argument("--coreset-min", type=int, default=512)
     parser.add_argument("--k", type=int, default=5, help="K for kNN anomaly scoring.")
@@ -74,11 +71,8 @@ def main():
     )
 
     model = PatchCore(
-        backbone=args.backbone,
-        layers=args.layers.split(","),
         device=device,
         patch_size=args.patch_size,
-        stride=args.stride,
         coreset_ratio=args.coreset_ratio,
         coreset_min_samples=args.coreset_min,
         k_neighbors=args.k,
