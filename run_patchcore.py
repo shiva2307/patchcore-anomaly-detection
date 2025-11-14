@@ -79,7 +79,7 @@ def evaluate(
             patch_batch = feature_extractor(images)
             labels = batch["label"]
             masks = batch["mask"]
-            metadata = batch["meta"]
+            metadata = batch["meta"]  # this is a dict of lists
 
             for idx in range(images.size(0)):
                 patch_scores, anomaly_map = scorer.score(
@@ -87,6 +87,17 @@ def evaluate(
                     memory,
                     patch_batch.grid_size,
                 )
+
+                # 🔹 build per-sample meta dict from dict-of-lists
+                if isinstance(metadata, dict):
+                    sample_meta = {
+                        key: (value[idx] if isinstance(value, (list, tuple)) else value)
+                        for key, value in metadata.items()
+                    }
+                else:
+                    # fallback if someone later changes collate_fn
+                    sample_meta = metadata[idx]
+
                 results.append(
                     {
                         "score": patch_scores.max().item(),
@@ -94,10 +105,11 @@ def evaluate(
                         "anomaly_map": anomaly_map.cpu(),
                         "label": int(labels[idx]),
                         "mask": masks[idx],
-                        "meta": metadata[idx],
+                        "meta": sample_meta,
                     }
                 )
     return results
+
 
 
 def compute_metrics(results: list[dict]) -> tuple[float, float]:
@@ -131,8 +143,14 @@ def compute_metrics(results: list[dict]) -> tuple[float, float]:
 
 def save_heatmaps(results: list[dict], crop_size: int, save_dir: Path, limit: int) -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
+
     for idx, item in enumerate(results[:limit]):
-        image_path = Path(item["meta"]["path"])
+        image_path = Path(item["meta"]["path"])  # original image path
+
+        # Read original image
+        image = Image.open(image_path).convert("RGB")
+
+        # Upsample anomaly map to image size
         anomaly_map = item["anomaly_map"].unsqueeze(0).unsqueeze(0)
         upsampled = F.interpolate(
             anomaly_map,
@@ -140,12 +158,22 @@ def save_heatmaps(results: list[dict], crop_size: int, save_dir: Path, limit: in
             mode="bilinear",
             align_corners=False,
         ).squeeze().cpu().numpy()
-        image = Image.open(image_path).convert("RGB")
-        overlay_heatmap(
+
+        # Create heatmap overlay
+        heatmap_image = overlay_heatmap(
             image=image,
             anomaly_map=upsampled,
-            save_path=save_dir / f"{idx:03d}_{image_path.stem}.png",
+            save_path=None,  # we'll handle saving manually
+            return_image=True
         )
+
+        # Create side-by-side output
+        combined = Image.new("RGB", (image.width * 2, image.height))
+        combined.paste(image, (0, 0))              # left
+        combined.paste(heatmap_image, (image.width, 0))  # right
+
+        # Save final combined image
+        combined.save(save_dir / f"{idx:03d}_{image_path.stem}.png")
 
 
 def main() -> None:
