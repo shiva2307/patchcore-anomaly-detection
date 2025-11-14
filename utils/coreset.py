@@ -1,35 +1,58 @@
 from __future__ import annotations
 
+import math
+
 import torch
 
 
-def farthest_point_sampling(embeddings: torch.Tensor, num_samples: int) -> torch.Tensor:
-    """Naive Farthest Point Sampling (FPS) used by PatchCore for coreset selection."""
-    if embeddings.dim() != 2:
-        raise ValueError("Embeddings for FPS must be 2D.")
+def farthest_point_sampling(
+    embeddings: torch.Tensor,
+    ratio: float,
+    min_samples: int = 1,
+) -> torch.Tensor:
+    """Select a diverse coreset via greedy farthest-point sampling.
 
-    total = embeddings.size(0)
-    if num_samples >= total:
+    Args:
+        embeddings: Tensor of shape (N, D) containing patch descriptors.
+        ratio: Fraction (0, 1] of descriptors to keep.
+        min_samples: Lower bound on the coreset size.
+
+    Returns:
+        Tensor of shape (K, D) where K = ceil(N * ratio) clamped to [min_samples, N].
+    """
+    if embeddings.dim() != 2:
+        raise ValueError("Embeddings for FPS must be 2D (num_vectors, dim).")
+    if not 0 < ratio <= 1:
+        raise ValueError("ratio must lie in (0, 1].")
+    if min_samples <= 0:
+        raise ValueError("min_samples must be positive.")
+
+    num_points = embeddings.size(0)
+    target = int(math.ceil(num_points * ratio))
+    target = max(min_samples, target)
+    target = min(target, num_points)
+
+    if target == num_points:
         return embeddings
 
     device = embeddings.device
-    selected_indices = torch.zeros(num_samples, dtype=torch.long, device=device)
-    distances = torch.full((total,), float("inf"), device=device)
+    selected = torch.empty(target, dtype=torch.long, device=device)
+    min_distances = torch.full((num_points,), float("inf"), device=device)
 
-    # Randomly seed FPS to encourage coverage.
-    seed = torch.randint(0, total, (1,), device=device)
-    selected_indices[0] = seed
+    # Start with the point farthest from the mean for stable behavior.
+    centroid = embeddings.mean(dim=0, keepdim=True)
+    initial_distances = torch.cdist(embeddings, centroid).squeeze(1)
+    selected[0] = torch.argmax(initial_distances)
+    anchor = embeddings[selected[0]].unsqueeze(0)
+    min_distances = torch.minimum(min_distances, torch.cdist(embeddings, anchor).squeeze(1))
 
-    centroid = embeddings[seed]
-    distances = torch.minimum(distances, torch.norm(embeddings - centroid, dim=1))
+    for i in range(1, target):
+        next_idx = torch.argmax(min_distances)
+        selected[i] = next_idx
+        anchor = embeddings[next_idx].unsqueeze(0)
+        min_distances = torch.minimum(min_distances, torch.cdist(embeddings, anchor).squeeze(1))
 
-    for i in range(1, num_samples):
-        next_index = torch.argmax(distances)
-        selected_indices[i] = next_index
-        candidate = embeddings[next_index]
-        distances = torch.minimum(distances, torch.norm(embeddings - candidate, dim=1))
-
-    return embeddings[selected_indices]
+    return embeddings[selected]
 
 
 class CoresetSampler:
@@ -42,6 +65,4 @@ class CoresetSampler:
         self.min_samples = min_samples
 
     def __call__(self, embeddings: torch.Tensor) -> torch.Tensor:
-        target = max(self.min_samples, int(len(embeddings) * self.ratio))
-        target = min(target, len(embeddings))
-        return farthest_point_sampling(embeddings, target)
+        return farthest_point_sampling(embeddings, self.ratio, self.min_samples)
