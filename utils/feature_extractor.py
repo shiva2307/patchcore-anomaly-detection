@@ -6,21 +6,23 @@ import torch
 from torch import nn
 from torchvision import models
 
-__all__ = ["WideResNetFeatureExtractor"]
+__all__ = ["CNNFeatureExtractor", "WideResNetFeatureExtractor"]
 
 
-class WideResNetFeatureExtractor(nn.Module):
-    """Feature extractor that exposes intermediate WideResNet activation maps."""
+class CNNFeatureExtractor(nn.Module):
+    """Feature extractor that exposes intermediate activation maps from ResNet variants."""
 
     def __init__(
         self,
+        backbone: str = "wide_resnet50_2",
         layers: Sequence[str] = ("layer2", "layer3"),
         pretrained: bool = True,
         train_backbone: bool = False,
     ) -> None:
         super().__init__()
+        self.backbone_name = backbone
         self.layers = list(layers)
-        self.backbone = self._build_backbone(pretrained)
+        self.backbone = self._build_backbone(backbone, pretrained)
         self._activations: dict[str, torch.Tensor] = {}
         self._register_hooks()
 
@@ -50,12 +52,25 @@ class WideResNetFeatureExtractor(nn.Module):
             module_dict[layer_name].register_forward_hook(self._make_hook(layer_name))
 
     @staticmethod
-    def _build_backbone(pretrained: bool) -> nn.Module:
-        try:
-            weight_enum = (
-                models.Wide_ResNet50_2_Weights.IMAGENET1K_V2 if pretrained else None
-            )
-            return models.wide_resnet50_2(weights=weight_enum)
-        except AttributeError:
-            # Fallback for older torchvision versions.
-            return models.wide_resnet50_2(pretrained=pretrained)
+    def _build_backbone(backbone: str, pretrained: bool) -> nn.Module:
+        name = backbone.lower()
+        if name in {"wide_resnet50_2", "wide_resnet50", "wideresnet50"}:
+            try:
+                weights = models.Wide_ResNet50_2_Weights.IMAGENET1K_V2 if pretrained else None
+                return models.wide_resnet50_2(weights=weights)
+            except AttributeError:
+                return models.wide_resnet50_2(pretrained=pretrained)
+        if name in {"resnet50", "rn50"}:
+            try:
+                weights = models.ResNet50_Weights.IMAGENET1K_V2 if pretrained else None
+                return models.resnet50(weights=weights)
+            except AttributeError:
+                return models.resnet50(pretrained=pretrained)
+        raise ValueError(f"Unsupported backbone '{backbone}'.")
+
+
+# Backwards compatible alias.
+class WideResNetFeatureExtractor(CNNFeatureExtractor):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("backbone", "wide_resnet50_2")
+        super().__init__(*args, **kwargs)

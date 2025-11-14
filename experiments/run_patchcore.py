@@ -12,11 +12,6 @@ from torch.utils.data import DataLoader
 
 from datasets.mvtec_loader import MVTecDataset
 from models.patchcore import PatchCore
-from utils.coreset import CoresetSampler
-from utils.feature_extractor import WideResNetFeatureExtractor
-from utils.memory_bank import MemoryBank
-from utils.nearest_neighbor import NearestNeighborScorer
-from utils.patch_extractor import PatchExtractor
 from utils.visualization import overlay_heatmap
 
 
@@ -30,6 +25,9 @@ def parse_args():
     parser.add_argument("--crop", type=int, default=224)
     parser.add_argument("--augment", action="store_true", help="Enable light augmentation on the train split.")
     parser.add_argument("--layers", type=str, default="layer2,layer3", help="Comma separated backbone layers.")
+    parser.add_argument("--backbone", type=str, default="wide_resnet50_2", choices=["wide_resnet50_2", "resnet50"])
+    parser.add_argument("--patch-size", type=int, default=3)
+    parser.add_argument("--stride", type=int, default=1)
     parser.add_argument("--coreset-ratio", type=float, default=0.01)
     parser.add_argument("--coreset-min", type=int, default=512)
     parser.add_argument("--k", type=int, default=5, help="K for kNN anomaly scoring.")
@@ -75,26 +73,23 @@ def main():
         pin_memory=(device.type == "cuda"),
     )
 
-    feature_extractor = WideResNetFeatureExtractor(layers=args.layers.split(","))
-    patch_extractor = PatchExtractor(kernel_size=3, stride=1, normalize=True)
-    memory_bank = MemoryBank(device="cpu")
-    coreset_sampler = CoresetSampler(ratio=args.coreset_ratio, min_samples=args.coreset_min)
-    nn_scorer = NearestNeighborScorer(k=args.k)
-
     model = PatchCore(
-        feature_extractor=feature_extractor,
-        patch_extractor=patch_extractor,
-        memory_bank=memory_bank,
-        nearest_neighbor=nn_scorer,
-        coreset_sampler=coreset_sampler,
-    ).to(device)
+        backbone=args.backbone,
+        layers=args.layers.split(","),
+        device=device,
+        patch_size=args.patch_size,
+        stride=args.stride,
+        coreset_ratio=args.coreset_ratio,
+        coreset_min_samples=args.coreset_min,
+        k_neighbors=args.k,
+    )
 
     print(f"Building memory bank for category {args.category} on {device}...")
-    model.build_memory_bank(train_loader, device=device)
-    print(f"Memory bank size: {len(memory_bank)}")
+    model.fit(train_loader)
+    print(f"Memory bank size: {len(model.memory_bank)}")
 
     print("Evaluating...")
-    results = model.evaluate(test_loader, device=device)
+    results = model.evaluate(test_loader)
 
     image_scores = np.array([res.image_score for res in results])
     image_labels = np.array([res.label for res in results])

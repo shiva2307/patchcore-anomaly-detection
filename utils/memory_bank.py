@@ -26,7 +26,7 @@ class MemoryBank:
 
     def get(self, device: torch.device | None = None) -> torch.Tensor:
         if self._storage is None:
-            raise RuntimeError("Memory bank is empty. Call build_memory_bank() first.")
+            raise RuntimeError("Memory bank is empty. Call PatchCore.fit() first.")
         if device is None or device == self.device:
             return self._storage
         return self._storage.to(device)
